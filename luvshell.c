@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <glob.h>
+#include <stdbool.h>
 
 #define MAX_COMMAND_LENGTH 1024
 #define MAX_ARGS 64
@@ -29,21 +30,44 @@ void cd_command(char *args[]) {
     }
 }
 
-void execute_command(char *args[]) {
+void execute_command(char *args[], bool background) {
     pid_t pid = fork();
     if (pid == -1) {
         perror("fork");
         exit(EXIT_FAILURE);
     } else if (pid == 0) {
+        // redireccion de entrada y salida si es necesario
+        int in_fd, out_fd;
+        if (args[2] != NULL && strcmp(args[2], "<") == 0) {
+            in_fd = open(args[3], O_RDONLY);
+            if (in_fd == -1) {
+                perror("open");
+                exit(EXIT_FAILURE);
+            }
+            dup2(in_fd, STDIN_FILENO);
+            close(in_fd);
+        }
+        if (args[4] != NULL && strcmp(args[4], ">") == 0) {
+            out_fd = open(args[5], O_WRONLY | O_CREAT | O_TRUNC, 0666);
+            if (out_fd == -1) {
+                perror("open");
+                exit(EXIT_FAILURE);
+            }
+            dup2(out_fd, STDOUT_FILENO);
+            close(out_fd);
+        }
         execvp(args[0], args);
         perror("execvp");
         exit(EXIT_FAILURE);
     } else {
-        int status;
-        waitpid(pid, &status, 0);
+        if (!background) {
+            int status;
+            waitpid(pid, &status, 0);
+        }
     }
 }
 
+/*
 void expand_wildcards(char *args[]) {
     glob_t glob_result;
     int i = 0;
@@ -59,6 +83,7 @@ void expand_wildcards(char *args[]) {
         i++;
     }
 }
+*/
 
 int main() {
     char command[MAX_COMMAND_LENGTH];
@@ -80,7 +105,13 @@ int main() {
         char *args[MAX_ARGS];
         char *token = strtok(command, " ");
         int i = 0;
+        bool background = false;
         while (token != NULL && i < MAX_ARGS - 1) {
+            if (strcmp(token, "&") == 0){
+                background = true;
+                token = strtok(NULL, " ");
+                continue;
+            }
             args[i++] = token;
             token = strtok(NULL, " ");
         }
@@ -92,9 +123,9 @@ int main() {
                 cd_command(args);
             } else {
                 // expandir las wildcards en los argumentos
-                expand_wildcards(args);
+                // expand_wildcards(args);
                 // ejecutar comando externo
-                execute_command(args);
+                execute_command(args, background);
             }
         }
     }
